@@ -21,8 +21,6 @@ dependencies {
 
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 
-    // This dependency is used by the application.
-    implementation(libs.guava)
 }
 
 // Apply a specific Java toolchain to ease working on different environments.
@@ -33,8 +31,12 @@ java {
 }
 
 application {
-    // Define the main class for the application.
     mainClass = "uk.co.jrwroberts.homelabdefender.App"
+    applicationDefaultJvmArgs = listOf("--add-modules", "jdk.httpserver")
+}
+
+tasks.withType<JavaCompile>().configureEach {
+    options.compilerArgs.addAll(listOf("--add-modules", "jdk.httpserver"))
 }
 
 tasks.named<Test>("test") {
