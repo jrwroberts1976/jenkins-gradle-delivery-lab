@@ -104,7 +104,7 @@ Create the job as a **Multibranch Pipeline**:
 
    Jenkins will scan the repository every five minutes and discover branches containing a `Jenkinsfile`.
 
-The initial pipeline runs `./gradlew clean test` and packages the application distribution. Container building is deliberately disabled unless the `BUILD_CONTAINER` parameter is selected.
+The initial pipeline runs `./gradlew clean test` and packages the application distribution. Container building is disabled unless `BUILD_CONTAINER` is selected. To publish, select `PUBLISH_CONTAINER`; the pipeline builds an immutable `homelab-defender:<build-number>` image, retrieves the `homelab-registry` credential only within the publish stage, pushes it to the internal registry, and logs out.
 
 ## Why this exists
 
