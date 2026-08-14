@@ -1,8 +1,14 @@
 pipeline {
   agent any
 
+  environment {
+    REGISTRY = '192.168.2.220:5000'
+    IMAGE_NAME = 'homelab-defender'
+  }
+
   parameters {
-    booleanParam(name: 'BUILD_CONTAINER', defaultValue: false, description: 'Build a local Docker image after tests pass.')
+    booleanParam(name: 'BUILD_CONTAINER', defaultValue: false, description: 'Build a Docker image after tests pass.')
+    booleanParam(name: 'PUBLISH_CONTAINER', defaultValue: false, description: 'Build and publish an immutable image to the private registry after tests pass.')
   }
 
   stages {
@@ -20,9 +26,38 @@ pipeline {
     }
 
     stage('Containerise') {
-      when { expression { return params.BUILD_CONTAINER } }
+      when {
+        expression { return params.BUILD_CONTAINER || params.PUBLISH_CONTAINER }
+      }
       steps {
-        sh 'docker build --tag homelab-defender:' + env.BUILD_NUMBER + ' .'
+        sh 'docker build --tag ' + env.IMAGE_NAME + ':' + env.BUILD_NUMBER + ' .'
+      }
+    }
+
+    stage('Publish image') {
+      when {
+        expression { return params.PUBLISH_CONTAINER }
+      }
+      steps {
+        withCredentials([
+          usernamePassword(
+            credentialsId: 'homelab-registry',
+            usernameVariable: 'REGISTRY_USERNAME',
+            passwordVariable: 'REGISTRY_PASSWORD'
+          )
+        ]) {
+          sh '''
+            set +x
+            image="${IMAGE_NAME}:${BUILD_NUMBER}"
+            target="${REGISTRY}/${IMAGE_NAME}:${BUILD_NUMBER}"
+
+            printf '%s' "$REGISTRY_PASSWORD" | docker login "$REGISTRY" \
+              --username "$REGISTRY_USERNAME" --password-stdin
+            docker tag "$image" "$target"
+            docker push "$target"
+            docker logout "$REGISTRY"
+          '''
+        }
       }
     }
   }
