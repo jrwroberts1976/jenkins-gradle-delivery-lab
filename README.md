@@ -2,6 +2,8 @@
 
 A practical learning project for Java, Gradle, Jenkins, Docker and Kubernetes.
 
+New to the project? Read the [Beginner’s Guide](BEGINNERS_GUIDE.md) for a plain-English explanation of what each part does and where we are.
+
 The end product will be a small browser game where players respond to common homelab incidents — failed backups, disk pressure, suspicious requests and pending security updates. The game is deliberately modest; the real focus is learning a complete, supportable delivery path.
 
 ## What this project will demonstrate
@@ -59,8 +61,8 @@ GitHub change
 - ✅ An authenticated private registry is already running on the TestServer LAN
 - ✅ Dedicated `jenkins-ci` registry account created
 - ✅ TestServer Docker and Jenkins’ isolated Docker builder trust the internal registry
-- ⏳ Store the `jenkins-ci` credential in Jenkins
-- ⏳ Push an immutable Jenkins image tag to the registry
+- ✅ The `jenkins-ci` credential is stored in Jenkins
+- ⏳ Validate the first immutable Jenkins image push to the registry
 - ⏳ Configure K3s to pull from the internal registry
 - ⏳ Add an isolated K3s test deployment
 
@@ -68,11 +70,11 @@ GitHub change
 
 Jenkins can test, package and build a Docker image without access to TestServer's host Docker socket. The isolated Docker builder and the TestServer Docker daemon are configured to trust the authenticated internal registry.
 
-The remaining work is to store the `jenkins-ci` credential in Jenkins, update the pipeline to log in and push immutable build-number tags, then configure K3s to pull only those images into an isolated test namespace.
+The next validation is a Jenkins publish build. It will log in with the Jenkins-held `jenkins-ci` credential, push an immutable build-number tag, and log out. After that, K3s will be configured to pull only those images into an isolated test namespace.
 
 ## Planned milestones
 
-1. Store the registry credential in Jenkins and push a successful image.
+1. Push and verify the first successful Jenkins image in the registry.
 2. Configure K3s registry access and deploy into an isolated namespace.
 3. Add health checks and a rollback path.
 4. Add an externally accessible game route through Cloudflare.
