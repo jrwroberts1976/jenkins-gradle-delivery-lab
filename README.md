@@ -44,6 +44,7 @@ GitHub change
 - The private registry is LAN-only and protected with htpasswd authentication.
 - The registry's `jenkins-ci` service account is for Jenkins image publishing; its password is held outside Git.
 - Docker trusts only the internal registry as an HTTP exception; it does not relax registry security generally.
+- The firewall allows registry access only from the Jenkins Docker network; registry authentication is still required.
 - No credentials, kubeconfig files or deployment secrets are committed to this repository.
 - Container publishing and Kubernetes deployment remain disabled until Jenkins and K3s have scoped credentials and a registry workflow.
 - Deployment is earned through validation rather than enabled by default.
@@ -61,6 +62,7 @@ GitHub change
 - ✅ An authenticated private registry is already running on the TestServer LAN
 - ✅ Dedicated `jenkins-ci` registry account created
 - ✅ TestServer Docker and Jenkins’ isolated Docker builder trust the internal registry
+- ✅ Firewall access is restricted to the Jenkins Docker network and validated against the registry
 - ✅ The `jenkins-ci` credential is stored in Jenkins
 - ⏳ Validate the first immutable Jenkins image push to the registry
 - ⏳ Configure K3s to pull from the internal registry
