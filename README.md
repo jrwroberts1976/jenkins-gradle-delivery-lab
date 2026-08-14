@@ -20,6 +20,7 @@ GitHub change
   → Jenkins build
   → Gradle test and package
   → Docker image build
+  → Private registry
   → K3s test deployment
   → Health check
   → Public game release through Cloudflare
@@ -31,15 +32,18 @@ GitHub change
 |---|---|---|
 | Source code and pipeline definition | GitHub | Public, version-controlled project source |
 | Jenkins controller | TestServer | Internal-only CI/CD controller |
+| Private container registry | TestServer LAN | Authenticated image hand-off between Jenkins and K3s |
 | Kubernetes runtime | k3s-node-01 | Runs the test deployment |
 | Public access | Cloudflare | Publishes the game only — never Jenkins |
 
 ## Security and operating principles
 
 - Jenkins is intentionally not exposed through Cloudflare or Nginx Proxy Manager.
+- The private registry is LAN-only and protected with htpasswd authentication.
+- The registry's `jenkins-ci` service account is for Jenkins image publishing; its password is held outside Git.
 - No credentials, kubeconfig files or deployment secrets are committed to this repository.
-- Container publishing and Kubernetes deployment will remain manual/disabled until scoped credentials and a registry workflow are in place.
-- The first pipeline will build and test only; deployment is earned through validation rather than enabled by default.
+- Container publishing and Kubernetes deployment remain disabled until Jenkins and K3s have scoped credentials and a registry workflow.
+- Deployment is earned through validation rather than enabled by default.
 
 ## Current status
 
@@ -51,25 +55,25 @@ GitHub change
 - ✅ First Jenkins build completed successfully: test and package stages passed
 - ✅ Jenkins build #2 successfully built the Docker image `homelab-defender:2`
 - ✅ The image is held in Jenkins’ isolated Docker-in-Docker builder
-- ⏳ An image registry and K3s test deployment still need to be configured
+- ✅ An authenticated private registry is already running on the TestServer LAN
+- ✅ Dedicated `jenkins-ci` registry account created
+- ⏳ Configure Docker, Jenkins and K3s to trust and use the internal registry
+- ⏳ Add an isolated K3s test deployment
 
 ## Current delivery boundary
 
-Jenkins can now test, package and build a Docker image without access to
-TestServer's host Docker socket. The resulting image is stored in the isolated
-Jenkins builder, so it is not yet available to K3s. The next milestone is to
-push approved images to a registry reachable by `k3s-node-01`, then deploy
-only to an isolated test namespace.
+Jenkins can test, package and build a Docker image without access to TestServer's host Docker socket. The resulting image is stored in the isolated Jenkins builder, so it is not yet available to K3s.
+
+The registry is the intended hand-off point. The remaining work is to configure its approved clients to use it, store the `jenkins-ci` credential in Jenkins, push immutable build-number tags, and configure K3s to pull only those images into an isolated test namespace.
 
 ## Planned milestones
 
-1. Create a small Java game and accompanying unit tests.
-2. Build and run it locally with Gradle.
-3. Add a Jenkinsfile to test and package every Git change.
-4. Build a Docker image from successful builds.
-5. Deploy into an isolated K3s namespace.
-6. Add an externally accessible game route through Cloudflare.
-7. Document monitoring, rollback and operational support.
+1. Configure the registry clients and Jenkins credential.
+2. Push a successful Jenkins image to the internal registry.
+3. Deploy it into an isolated K3s namespace.
+4. Add health checks and a rollback path.
+5. Add an externally accessible game route through Cloudflare.
+6. Document monitoring and operational support.
 
 ## Jenkins setup
 
@@ -102,7 +106,3 @@ The initial pipeline runs `./gradlew clean test` and packages the application di
 ## Why this exists
 
 The aim is to learn modern build and delivery practices without pretending that a pipeline alone creates reliable delivery. A useful pipeline has clear ownership, protected capacity, test evidence, safe deployment boundaries and operational feedback.
-
----
-
-Status: Jenkins controller installed on TestServer; application scaffold and pipeline are the next steps.
