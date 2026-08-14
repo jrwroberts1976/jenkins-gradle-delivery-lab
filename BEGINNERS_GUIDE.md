@@ -54,6 +54,7 @@ We have completed the build side of the journey:
 - A protected private registry already runs on the TestServer LAN.
 - A dedicated `jenkins-ci` account exists for publishing images.
 - TestServer Docker and Jenkins’ Docker builder are configured to use that registry.
+- The TestServer firewall permits registry access from the Jenkins Docker network only; the registry still requires a username and password.
 - The Jenkins credential is stored in Jenkins, not in this repository.
 - The first registry publish build is the next validation step.
 
@@ -118,6 +119,7 @@ Think of it as a small workshop:
 - **Jenkins** is the workbench that checks and assembles the product.
 - **Docker** is the sealed delivery box.
 - **The registry** is the locked stockroom.
+- **The firewall rule** is the staff-only door between the workbench and stockroom.
 - **Kubernetes** is the team that places the box into service.
 - **Cloudflare** is the public reception desk.
 
