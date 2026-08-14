@@ -41,6 +41,7 @@ GitHub change
 - Jenkins is intentionally not exposed through Cloudflare or Nginx Proxy Manager.
 - The private registry is LAN-only and protected with htpasswd authentication.
 - The registry's `jenkins-ci` service account is for Jenkins image publishing; its password is held outside Git.
+- Docker trusts only the internal registry as an HTTP exception; it does not relax registry security generally.
 - No credentials, kubeconfig files or deployment secrets are committed to this repository.
 - Container publishing and Kubernetes deployment remain disabled until Jenkins and K3s have scoped credentials and a registry workflow.
 - Deployment is earned through validation rather than enabled by default.
@@ -57,23 +58,25 @@ GitHub change
 - ✅ The image is held in Jenkins’ isolated Docker-in-Docker builder
 - ✅ An authenticated private registry is already running on the TestServer LAN
 - ✅ Dedicated `jenkins-ci` registry account created
-- ⏳ Configure Docker, Jenkins and K3s to trust and use the internal registry
+- ✅ TestServer Docker and Jenkins’ isolated Docker builder trust the internal registry
+- ⏳ Store the `jenkins-ci` credential in Jenkins
+- ⏳ Push an immutable Jenkins image tag to the registry
+- ⏳ Configure K3s to pull from the internal registry
 - ⏳ Add an isolated K3s test deployment
 
 ## Current delivery boundary
 
-Jenkins can test, package and build a Docker image without access to TestServer's host Docker socket. The resulting image is stored in the isolated Jenkins builder, so it is not yet available to K3s.
+Jenkins can test, package and build a Docker image without access to TestServer's host Docker socket. The isolated Docker builder and the TestServer Docker daemon are configured to trust the authenticated internal registry.
 
-The registry is the intended hand-off point. The remaining work is to configure its approved clients to use it, store the `jenkins-ci` credential in Jenkins, push immutable build-number tags, and configure K3s to pull only those images into an isolated test namespace.
+The remaining work is to store the `jenkins-ci` credential in Jenkins, update the pipeline to log in and push immutable build-number tags, then configure K3s to pull only those images into an isolated test namespace.
 
 ## Planned milestones
 
-1. Configure the registry clients and Jenkins credential.
-2. Push a successful Jenkins image to the internal registry.
-3. Deploy it into an isolated K3s namespace.
-4. Add health checks and a rollback path.
-5. Add an externally accessible game route through Cloudflare.
-6. Document monitoring and operational support.
+1. Store the registry credential in Jenkins and push a successful image.
+2. Configure K3s registry access and deploy into an isolated namespace.
+3. Add health checks and a rollback path.
+4. Add an externally accessible game route through Cloudflare.
+5. Document monitoring and operational support.
 
 ## Jenkins setup
 
