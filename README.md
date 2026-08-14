@@ -49,7 +49,17 @@ GitHub change
 - ✅ Jenkins controller running internally on TestServer
 - ✅ Jenkins Multibranch Pipeline connected to `main`
 - ✅ First Jenkins build completed successfully: test and package stages passed
-- ⏳ Docker image build, image registry and K3s test deployment still to be configured
+- ✅ Jenkins build #2 successfully built the Docker image `homelab-defender:2`
+- ✅ The image is held in Jenkins’ isolated Docker-in-Docker builder
+- ⏳ An image registry and K3s test deployment still need to be configured
+
+## Current delivery boundary
+
+Jenkins can now test, package and build a Docker image without access to
+TestServer's host Docker socket. The resulting image is stored in the isolated
+Jenkins builder, so it is not yet available to K3s. The next milestone is to
+push approved images to a registry reachable by `k3s-node-01`, then deploy
+only to an isolated test namespace.
 
 ## Planned milestones
 
