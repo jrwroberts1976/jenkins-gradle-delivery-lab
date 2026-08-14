@@ -41,6 +41,16 @@ GitHub change
 - Container publishing and Kubernetes deployment will remain manual/disabled until scoped credentials and a registry workflow are in place.
 - The first pipeline will build and test only; deployment is earned through validation rather than enabled by default.
 
+## Current status
+
+- ✅ Public GitHub repository created
+- ✅ Java 21 Gradle project and Gradle Wrapper committed
+- ✅ Homelab Defender first playable build committed
+- ✅ Jenkins controller running internally on TestServer
+- ✅ Jenkins Multibranch Pipeline connected to `main`
+- ✅ First Jenkins build completed successfully: test and package stages passed
+- ⏳ Docker image build, image registry and K3s test deployment still to be configured
+
 ## Planned milestones
 
 1. Create a small Java game and accompanying unit tests.
