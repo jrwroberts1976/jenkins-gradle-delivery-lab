@@ -51,6 +51,34 @@ GitHub change
 6. Add an externally accessible game route through Cloudflare.
 7. Document monitoring, rollback and operational support.
 
+## Jenkins setup
+
+Jenkins runs internally on TestServer. It is not published through Cloudflare or Nginx Proxy Manager.
+
+Create the job as a **Multibranch Pipeline**:
+
+1. Select **New Item** and name it `homelab-defender`.
+2. Select **Multibranch Pipeline**.
+3. Under **Branch Sources**, choose **Git**.
+4. Use the public repository URL:
+
+   ```text
+   https://github.com/jrwroberts1976/jenkins-gradle-delivery-lab.git
+   ```
+
+   No GitHub credential is required while the repository remains public.
+
+5. Keep the script path as `Jenkinsfile`.
+6. Under **Scan Multibranch Pipeline Triggers**, configure:
+
+   ```text
+   H/5 * * * *
+   ```
+
+   Jenkins will scan the repository every five minutes and discover branches containing a `Jenkinsfile`.
+
+The initial pipeline runs `./gradlew clean test` and packages the application distribution. Container building is deliberately disabled unless the `BUILD_CONTAINER` parameter is selected.
+
 ## Why this exists
 
 The aim is to learn modern build and delivery practices without pretending that a pipeline alone creates reliable delivery. A useful pipeline has clear ownership, protected capacity, test evidence, safe deployment boundaries and operational feedback.
