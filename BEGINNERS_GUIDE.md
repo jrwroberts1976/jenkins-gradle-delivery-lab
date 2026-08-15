@@ -8,7 +8,7 @@ The application is **Homelab Defender**, a small browser game based on familiar 
 
 ```text
 Write code → test it → package it → put it in a container
-→ store the container safely → run it on Kubernetes
+→ security-check the container → store it safely → run it on Kubernetes
 ```
 
 Each step gives us evidence that the next step is safe to attempt.
@@ -23,7 +23,8 @@ Each step gives us evidence that the next step is safe to attempt.
 | Tests | Small automatic checks that the game still behaves as expected | Jenkins |
 | Jenkins | The automated build worker | TestServer, internal only |
 | Docker | A standard package containing the app and what it needs to run | Jenkins |
-| Private registry | A protected storage shelf for Docker packages | TestServer LAN |
+| Trivy | A security inspector that checks the Docker package for known vulnerabilities | Jenkins delivery process |
+| Private registry | A protected storage shelf for Docker packages that have passed the required checks | TestServer LAN |
 | K3s / Kubernetes | The platform that will run the packaged game | k3s-node-01 |
 | Cloudflare | The future public front door for the game | Internet edge |
 
@@ -37,26 +38,125 @@ With this project:
 2. Jenkins notices the change.
 3. Jenkins runs the tests.
 4. If the tests pass, Jenkins packages the application.
-5. When explicitly approved, Jenkins creates a Docker image.
-6. Jenkins puts that image in the private registry.
-7. Kubernetes will later pull that exact image and run it in a test area.
+5. When explicitly requested, Jenkins creates a Docker image.
+6. Trivy checks that Docker image for known security vulnerabilities.
+7. If the security policy is satisfied, Jenkins can put the image in the private registry.
+8. Kubernetes will later pull that exact image and run it in a test area.
 
-That means we can trace a running version back to a specific Git commit and Jenkins build.
+That means we can trace a running version back to a specific Git commit and Jenkins build, and we can also show that the image passed an automated security check before release.
 
 ## Where we are today
 
-We have completed the build side of the journey:
+We have completed the core build path and are now adding the security checkpoint:
 
 - The Java game and its Gradle build are in GitHub.
 - Jenkins is running internally on TestServer.
-- Jenkins has already proved it can run tests, create application packages and build a Docker image.
+- Jenkins has proved it can run tests, create application packages and build a Docker image.
 - Jenkins uses its own isolated Docker builder rather than controlling TestServer’s host Docker socket.
-- A protected private registry already runs on the TestServer LAN.
+- Jenkins talks to that builder securely over TLS.
+- Both Jenkins and its Docker builder use the internal `homelab_apps` network.
+- A protected private registry runs on the TestServer LAN.
 - A dedicated `jenkins-ci` account exists for publishing images.
-- TestServer Docker and Jenkins’ Docker builder are configured to use that registry.
 - The TestServer firewall permits registry access from the Jenkins Docker network only; the registry still requires a username and password.
-- The Jenkins credential is stored in Jenkins, not in this repository.
-- The first registry publish build is the next validation step.
+- The Jenkins registry credential is stored in Jenkins, not in this repository.
+- Trivy version `0.72.0` is already installed on TestServer.
+- Trivy is not installed inside the Jenkins controller container, and we do not need to put it there.
+- The next validation is to run Trivy as its own container and let it inspect an image inside Jenkins’ isolated Docker builder.
+- After that works, the Trivy check will be added to the Jenkins pipeline before image publishing.
+
+## What is the new security check?
+
+Building successfully does not automatically mean a Docker image is safe to release. The application tests tell us whether our application behaves as expected, but they do not tell us whether software inside the container has known security vulnerabilities.
+
+That is where **Trivy** comes in.
+
+Trivy examines the built container image and reports known vulnerabilities. We are planning to make it a Jenkins **security gate**.
+
+The pipeline will become:
+
+```text
+Tests
+  ↓
+Package
+  ↓
+Build Docker image
+  ↓
+Trivy security scan
+  ↓
+Publish to private registry
+```
+
+The important word is **gate**. The scan is not just a report that somebody might forget to read. Jenkins will use Trivy's result to decide whether it is allowed to continue.
+
+The intended rule is:
+
+```text
+Security check passes
+        ↓
+Jenkins may publish the image
+
+Security check fails
+        ↓
+Pipeline stops
+        ↓
+Image is NOT published
+```
+
+We intend to check `HIGH` and `CRITICAL` vulnerability findings and configure Trivy to return a failure code when the policy is breached. Jenkins understands that failure code and stops the later publish stage.
+
+## Why run Trivy in a container?
+
+Jenkins itself runs in a container, and its Docker images are built by another container called `jenkins-docker`.
+
+A simplified picture is:
+
+```text
+TestServer
+
+Jenkins controller
+      │
+      │ secure TLS connection
+      ▼
+Jenkins Docker builder
+      │
+      └── homelab-defender:<build-number>
+```
+
+Rather than installing more software permanently inside the Jenkins controller, we can start a temporary, known version of Trivy when a scan is needed.
+
+That gives us:
+
+```text
+Jenkins
+   │
+   ├── asks Docker builder to build the image
+   │
+   └── starts Trivy 0.72.0
+             │
+             └── scans the image in the Docker builder
+```
+
+When the scan is finished, the temporary Trivy container disappears.
+
+This keeps Jenkins simpler and makes it obvious which scanner version was used.
+
+## How Jenkins reaches its Docker builder securely
+
+We verified that Jenkins is configured with:
+
+```text
+DOCKER_HOST=tcp://docker:2376
+DOCKER_TLS_VERIFY=1
+DOCKER_CERT_PATH=/certs/client
+```
+
+In plain English:
+
+- `docker:2376` is the private address Jenkins uses to reach its Docker builder.
+- `TLS_VERIFY=1` means Jenkins verifies the secure connection rather than blindly trusting it.
+- `/certs/client` contains the client certificates used for that secure connection.
+
+The Trivy container will use the same private network and a read-only copy of the required client certificates so that it can inspect the image without weakening this boundary.
 
 ## Why the registry needs a username and password
 
@@ -78,35 +178,44 @@ When starting a build manually, Jenkins offers two checkboxes:
 | Option | What it does |
 |---|---|
 | `BUILD_CONTAINER` | Runs tests, packages the game and creates a Docker image inside Jenkins’ isolated builder. |
-| `PUBLISH_CONTAINER` | Does all of the above, then safely pushes an image tagged with the Jenkins build number to the private registry. |
+| `PUBLISH_CONTAINER` | Builds the image and, once the security gate is added and passes, continues to the authenticated private-registry publish stage. |
 
-Publishing automatically includes building, so only `PUBLISH_CONTAINER` is needed for the first registry test.
+Publishing automatically includes building, so `PUBLISH_CONTAINER` requests the complete release path.
 
-A build number makes the image immutable. For example, build 3 becomes:
+A build number gives each image a specific identity. For example, build 7 becomes:
 
 ```text
-homelab-defender:3
+homelab-defender:7
 ```
 
-Later, Kubernetes will be told to run that exact version rather than an ambiguous “latest” image.
+Later, Kubernetes will be told to run that exact version rather than an ambiguous `latest` image.
 
 ## What happens next
 
-The next task is deliberately small:
+The next task is deliberately small and testable:
 
-1. Run a Jenkins build with `PUBLISH_CONTAINER` selected.
-2. Confirm the image appears in the private registry.
-3. Configure K3s to authenticate to that registry.
-4. Create a separate Kubernetes test namespace.
-5. Deploy one known image, check its health endpoint, and prove rollback works.
+1. Start a Trivy `0.72.0` container from Jenkins.
+2. Connect it to the same isolated Docker builder using the existing TLS setup.
+3. Scan an existing `homelab-defender` image.
+4. Confirm Trivy can correctly return success or failure to Jenkins.
+5. Add a `Security Scan` stage between `Containerise` and `Publish image` in the `Jenkinsfile`.
+6. Run the complete gated pipeline.
+7. Confirm only an image that passes the gate reaches the private registry.
+8. Configure K3s to authenticate to the registry.
+9. Create a separate Kubernetes test namespace and deploy a known image.
 
 Only after the test deployment is dependable will we consider a Cloudflare-published game URL.
 
 ## Safety boundaries
 
 - Jenkins remains internal-only.
+- Jenkins does not receive TestServer's host Docker socket.
+- Jenkins-to-builder Docker traffic uses TLS.
+- The Trivy scanner will be temporary and versioned rather than permanently added to Jenkins.
+- The scanner receives only the access needed to inspect the isolated Docker builder.
+- A failed security gate prevents the image publish stage from running.
 - Cloudflare will publish the game, not Jenkins, Kubernetes control pages or the registry.
-- Registry and Kubernetes credentials stay out of GitHub.
+- Registry, Docker TLS and Kubernetes credentials stay out of GitHub.
 - The first Kubernetes deployment is a test deployment, not a production service.
 - Each release is identified by an immutable build number.
 
@@ -118,9 +227,12 @@ Think of it as a small workshop:
 - **Gradle** is the build instruction sheet.
 - **Jenkins** is the workbench that checks and assembles the product.
 - **Docker** is the sealed delivery box.
+- **Trivy** is the security inspector who checks the sealed box before it leaves the workshop.
 - **The registry** is the locked stockroom.
 - **The firewall rule** is the staff-only door between the workbench and stockroom.
-- **Kubernetes** is the team that places the box into service.
+- **Kubernetes** is the team that places an approved box into service.
 - **Cloudflare** is the public reception desk.
+
+The important change is that the box will not simply go from the workbench to the stockroom. It must pass the security inspector first.
 
 Every hand-off is intentional, recorded and checked.
