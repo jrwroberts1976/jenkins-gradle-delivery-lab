@@ -2,171 +2,185 @@
 
 A practical learning project for Java, Gradle, Jenkins, Docker, container security and Kubernetes.
 
-New to the project? Read the [Beginner’s Guide](BEGINNERS_GUIDE.md) for a plain-English explanation of what each part does and where we are.
+New to the project? Read the [Beginner’s Guide](BEGINNERS_GUIDE.md) for a plain-English explanation, and use the [Glossary](GLOSSARY.md) for the terms used throughout the lab.
 
-The end product will be a small browser game where players respond to common homelab incidents — failed backups, disk pressure, suspicious requests and pending security updates. The game is deliberately modest; the real focus is learning a complete, supportable delivery path.
+The end product is a small browser game where players respond to common homelab incidents. The game is deliberately modest; the main purpose is learning and proving a complete, supportable software delivery path.
 
-## What this project will demonstrate
+## What this project demonstrates
 
 - Java application design and unit testing
 - Gradle builds, dependency management and repeatable packaging
 - Jenkins Pipeline as Code through a versioned `Jenkinsfile`
-- Docker image construction
+- Docker image construction using an isolated Docker-in-Docker builder
 - Container vulnerability scanning with Trivy
-- Security gates that can stop a vulnerable image before publication
-- Kubernetes deployment to a non-production K3s namespace
-- Health checks, release gates and basic operational ownership
+- A security gate that blocks vulnerable images before publication
+- Authenticated publication to a private Docker registry
+- Authenticated K3s/containerd pulls from that registry
+- Kubernetes Deployment, Service and health probes
+- Traceable immutable releases using Jenkins build numbers
 
-## Target delivery flow
+## Delivery flow
 
 ```text
 GitHub change
   → Jenkins build
   → Gradle test and package
   → Docker image build
-  → Trivy vulnerability scan
-  → Private registry
-  → K3s test deployment
-  → Health check
-  → Public game release through Cloudflare
+  → Trivy HIGH/CRITICAL vulnerability gate
+  → Authenticated private registry
+  → Authenticated K3s image pull
+  → Isolated Kubernetes deployment
+  → Readiness/liveness health checks
+  → Future public release through Cloudflare
 ```
 
 ## Platform design
 
 | Component | Location | Purpose |
 |---|---|---|
-| Source code and pipeline definition | GitHub | Public, version-controlled project source |
+| Source code and pipeline definition | GitHub | Public, version-controlled source and delivery definition |
 | Jenkins controller | TestServer | Internal-only CI/CD controller |
 | Jenkins Docker builder | TestServer | Isolated Docker-in-Docker daemon used for image builds |
-| Trivy | Security scanning stage | Checks built images for known vulnerabilities before publication |
-| Private container registry | TestServer LAN | Authenticated image hand-off between Jenkins and K3s |
-| Kubernetes runtime | k3s-node-01 | Runs the test deployment |
-| Public access | Cloudflare | Publishes the game only — never Jenkins |
+| Trivy | Jenkins security stage | Checks built images for known HIGH/CRITICAL vulnerabilities |
+| Private Docker registry | TestServer TCP 5000 | Authenticated image hand-off between Jenkins and K3s |
+| Kubernetes runtime | `k3s-node-01` | Runs the isolated test deployment |
+| Public access | Cloudflare | Planned public game route; Jenkins and the registry remain private |
 
 ## Security and operating principles
 
 - Jenkins is intentionally not exposed through Cloudflare or Nginx Proxy Manager.
 - Jenkins builds images through an isolated Docker-in-Docker daemon rather than TestServer's host Docker socket.
-- Jenkins connects to that Docker daemon over TLS using `tcp://docker:2376` and client certificates.
+- Jenkins connects to the builder over TLS using `tcp://docker:2376` and client certificates.
 - The Jenkins and Docker builder containers share the internal `homelab_apps` Docker network.
-- The next pipeline enhancement is a Trivy security gate between image construction and publication.
-- The Trivy gate policy is to inspect `HIGH` and `CRITICAL` findings and return a failing exit code when the policy is breached, preventing the publish stage from running.
-- Trivy `0.72.0` has been validated as a versioned container against Jenkins' isolated Docker daemon; it is intentionally not installed directly into the Jenkins controller container.
-- The private registry is LAN-only and protected with htpasswd authentication.
-- The registry's `jenkins-ci` service account is for Jenkins image publishing; its password is held outside Git.
-- Docker trusts only the internal registry as an HTTP exception; it does not relax registry security generally.
-- The firewall allows registry access only from the Jenkins Docker network; registry authentication is still required.
-- No credentials, TLS client certificates, kubeconfig files or deployment secrets are committed to this repository.
-- Deployment is earned through validation rather than enabled by default.
+- Trivy `0.72.0` is pinned in the pipeline and runs as a temporary container rather than being installed permanently in Jenkins.
+- The Trivy gate scans `HIGH` and `CRITICAL` findings and returns a non-zero exit code when policy is breached, stopping publication.
+- The final runtime image uses `eclipse-temurin:21-jre-jammy`, selected after the previous runtime exposed HIGH findings in `usr/bin/pebble`.
+- The private registry runs as the TestServer `docker-registry` host service and uses htpasswd Basic authentication.
+- Jenkins publishes with the dedicated `jenkins-ci` registry account. K3s uses a separate registry account for runtime pulls.
+- TestServer firewall access to TCP 5000 is restricted to required sources rather than the whole LAN.
+- K3s reads registry credentials and the HTTP endpoint from `/etc/rancher/k3s/registries.yaml`.
+- No registry passwords, TLS client certificates, kubeconfig files or deployment secrets are committed to this repository.
+- Images are tagged with Jenkins build numbers instead of `latest`, so a deployment identifies a specific release.
 
 ## Current status
 
 - ✅ Public GitHub repository created
 - ✅ Java 21 Gradle project and Gradle Wrapper committed
-- ✅ Homelab Defender first playable build committed
+- ✅ Homelab Defender playable application committed
 - ✅ Jenkins controller running internally on TestServer
 - ✅ Jenkins Multibranch Pipeline connected to `main`
-- ✅ Jenkins test and package stages validated
-- ✅ Jenkins successfully builds immutable `homelab-defender:<build-number>` Docker images
-- ✅ The image is held in Jenkins’ isolated Docker-in-Docker builder
-- ✅ An authenticated private registry is running on the TestServer LAN
-- ✅ Dedicated `jenkins-ci` registry account created
-- ✅ TestServer Docker and Jenkins’ isolated Docker builder trust the internal registry
-- ✅ Firewall access is restricted to the Jenkins Docker network and validated against the registry
-- ✅ The `homelab-registry` credential is stored in Jenkins
-- ✅ Jenkins-to-Docker TLS configuration verified (`DOCKER_HOST=tcp://docker:2376`, TLS verification enabled)
-- ✅ Trivy `0.72.0` is available on TestServer
-- ✅ Trivy `0.72.0` container successfully connected to the isolated Jenkins Docker daemon over TLS on `homelab_apps`
-- ✅ `homelab-defender:6` was scanned successfully from the isolated builder
-- ✅ Trivy gate behaviour validated: `--exit-code 1` returned exit code `1` for policy-breaking findings
-- ⚠️ `homelab-defender:6` currently reports 8 HIGH and 0 CRITICAL findings in `usr/bin/pebble`; the Ubuntu package scan reports 0 HIGH/CRITICAL findings
-- ⏳ Remediate the vulnerable runtime/base-image component and rebuild the image
-- ⏳ Add the Trivy security scan stage between `Containerise` and `Publish image`
-- ⏳ Validate the first immutable Jenkins image push to the registry through the gated pipeline
-- ⏳ Configure K3s to pull from the internal registry
-- ⏳ Add an isolated K3s test deployment
+- ✅ Gradle test and package stages validated
+- ✅ Jenkins builds immutable `homelab-defender:<build-number>` images in the isolated builder
+- ✅ Vulnerable runtime behaviour demonstrated with `homelab-defender:6` and 8 HIGH findings
+- ✅ Runtime remediated to `eclipse-temurin:21-jre-jammy`
+- ✅ Clean image behaviour demonstrated with 0 HIGH/CRITICAL findings
+- ✅ Automated `Security Scan` stage added to the Jenkinsfile
+- ✅ Trivy gate proven to fail policy-breaking images and pass compliant images
+- ✅ Authenticated registry publishing proven end to end
+- ✅ `homelab-defender:12` published successfully to `192.168.2.220:5000`
+- ✅ Registry catalog/tag query confirmed build `12` exists
+- ✅ `k3s-node-01` firewall path to the registry validated
+- ✅ K3s private-registry configuration loaded successfully
+- ✅ containerd authenticated to the HTTP registry and pulled `homelab-defender:12`
+- ✅ Isolated namespace `homelab-defender-test` created
+- ✅ Kubernetes Deployment rolled out successfully
+- ✅ ClusterIP Service created
+- ✅ `/healthz` returned HTTP 200 with `ok`
+- ✅ Game HTML served successfully through the Kubernetes Service
+- ⏳ Commit the Kubernetes deployment manifest to the repository instead of relying on an ad-hoc apply command
+- ⏳ Add an explicit rollback procedure and deployment verification commands
+- ⏳ Decide whether Jenkins should deploy automatically after publication or keep deployment as a separate approval step
+- ⏳ Add a controlled external game route through Cloudflare
+- ⏳ Document monitoring and operational support
+
+## Evidence from the first gated release
+
+The project now has a complete working hand-off from CI to Kubernetes.
+
+Jenkins build 12 completed the gated publication path and pushed:
+
+```text
+192.168.2.220:5000/homelab-defender:12
+```
+
+The image passed the automated Trivy HIGH/CRITICAL gate before the publish stage. Jenkins authenticated to the registry only during publication and logged out afterwards.
+
+K3s initially attempted HTTPS because the private-registry configuration had not yet been loaded by the running service. After restarting K3s, the service reported that it was using `/etc/rancher/k3s/registries.yaml`, and containerd generated an HTTP registry host entry plus authentication configuration.
+
+The pull then succeeded:
+
+```text
+Image is up to date for sha256:ef37d59b6c41d99394f053d5f02962e07136f76d7080ab049e5403ce80a8df3e
+```
+
+The deployment in namespace `homelab-defender-test` rolled out successfully. The application already exposes `/healthz`, so Kubernetes readiness and liveness probes can use the application itself as health evidence.
+
+The first service-level validation returned:
+
+```text
+HTTP/1.1 200 OK
+
+ok
+```
+
+and the main page returned the Homelab Defender HTML.
 
 ## Current delivery boundary
 
-Jenkins can test, package and build a Docker image without access to TestServer's host Docker socket. Its Docker client talks to the separate `jenkins-docker` daemon over TLS. The controller and builder are both attached to `homelab_apps`, and Jenkins receives its Docker client certificates through a read-only certificate path inside the controller.
-
-The manual scanner-to-builder validation is now complete. Trivy `0.72.0` ran as a temporary container on `homelab_apps`, used the existing Docker TLS client certificates, and successfully inspected `homelab-defender:6` inside the isolated builder.
-
-The first normal scan required a longer timeout because image analysis exceeded Trivy's default limit. Re-running with `--timeout 15m` completed successfully. The scan reported 0 HIGH/CRITICAL Ubuntu package findings and 8 HIGH findings in the `usr/bin/pebble` Go binary.
-
-The policy behaviour was then proven with `--severity HIGH,CRITICAL --exit-code 1`: Trivy returned exit code `1`, demonstrating that the intended Jenkins security gate can block an image that breaches policy before `Publish image` is reached.
-
-The security stage is not yet committed to the `Jenkinsfile`. The next engineering task is to remediate or replace the vulnerable runtime component, rebuild and rescan the image, and then add the proven gate to the pipeline.
-
-## Security scan design
-
-The intended flow is:
+The system deliberately separates responsibilities:
 
 ```text
-Gradle tests
-    ↓
-Application package + fingerprint
-    ↓
-Docker image build
-    ↓
-Trivy HIGH/CRITICAL vulnerability gate
-    ↓
-Authenticated private registry publish
+GitHub
+   ↓
+Jenkins controller
+   ↓ TLS
+isolated jenkins-docker daemon
+   ↓
+Trivy security gate
+   ↓ authenticated publish
+private registry on TestServer
+   ↓ authenticated pull
+K3s/containerd on k3s-node-01
+   ↓
+homelab-defender-test namespace
 ```
 
-The connection verified for both Jenkins and the temporary Trivy scanner is:
+The application is running only in the isolated test namespace. It is not yet exposed publicly.
+
+## Jenkins pipeline
+
+The current Jenkins stages are:
 
 ```text
-DOCKER_HOST=tcp://docker:2376
-DOCKER_TLS_VERIFY=1
-DOCKER_CERT_PATH=/certs/client
+Test
+  ↓
+Package
+  ↓
+Containerise
+  ↓
+Security Scan
+  ↓
+Publish image
 ```
 
-The Trivy container is attached to `homelab_apps`, receives the Docker TLS settings and a read-only mount of the client certificates, and scans `homelab-defender:${BUILD_NUMBER}` in the isolated builder. A `15m` timeout is used because the first manual image analysis exceeded the default Trivy timeout.
+`BUILD_CONTAINER` builds and scans an image. `PUBLISH_CONTAINER` requests the full gated build-and-publish path.
 
-The manual validation established both sides of the control: Trivy can reach and inspect the isolated image, and a HIGH/CRITICAL finding can produce a non-zero result suitable for stopping Jenkins before publication.
+The security stage runs pinned Trivy `0.72.0` with:
 
-## Planned milestones
+```text
+--timeout 15m
+--skip-version-check
+--scanners vuln
+--severity HIGH,CRITICAL
+--exit-code 1
+```
 
-1. Remediate the current `usr/bin/pebble` HIGH findings and rebuild the image.
-2. Re-scan and prove a compliant image can return a successful gate result.
-3. Add and validate the Jenkins vulnerability gate between `Containerise` and `Publish image`.
-4. Push and verify the first image that passes the security gate in the registry.
-5. Configure K3s registry access and deploy into an isolated namespace.
-6. Add health checks and a rollback path.
-7. Add an externally accessible game route through Cloudflare.
-8. Document monitoring and operational support.
+A finding that breaches policy stops the pipeline before publication.
 
-## Jenkins setup
+## Next engineering milestone
 
-Jenkins runs internally on TestServer. It is not published through Cloudflare or Nginx Proxy Manager.
-
-Create the job as a **Multibranch Pipeline**:
-
-1. Select **New Item** and name it `homelab-defender`.
-2. Select **Multibranch Pipeline**.
-3. Under **Branch Sources**, choose **Git**.
-4. Use the public repository URL:
-
-   ```text
-   https://github.com/jrwroberts1976/jenkins-gradle-delivery-lab.git
-   ```
-
-   No GitHub credential is required while the repository remains public.
-
-5. Keep the script path as `Jenkinsfile`.
-6. Under **Scan Multibranch Pipeline Triggers**, configure:
-
-   ```text
-   H/5 * * * *
-   ```
-
-   Jenkins will scan the repository every five minutes and discover branches containing a `Jenkinsfile`.
-
-The pipeline runs `./gradlew clean test` and packages the application distribution. Container building is disabled unless `BUILD_CONTAINER` is selected. To publish, select `PUBLISH_CONTAINER`; the pipeline builds an immutable `homelab-defender:<build-number>` image, retrieves the `homelab-registry` credential only within the publish stage, pushes it to the internal registry, and logs out.
-
-The next pipeline change will insert the Trivy security stage after `Containerise` and before `Publish image`. The manual test has already proven that a policy-breaking image returns a failure result; once the current image is remediated, that proven control can be moved into the Jenkinsfile.
+The next useful step is to make the successful Kubernetes deployment reproducible by storing its Namespace/Deployment/Service manifest in this repository. After that, add deployment verification and rollback instructions and decide whether deployment should remain a manual release action or become a separately gated Jenkins stage.
 
 ## Why this exists
 
-The aim is to learn modern build and delivery practices without pretending that a pipeline alone creates reliable delivery. A useful pipeline has clear ownership, protected capacity, test evidence, security evidence, safe deployment boundaries and operational feedback.
+The aim is to learn modern build and delivery practices without pretending that a pipeline alone creates reliable delivery. A useful delivery path has protected credentials, clear boundaries, test evidence, security evidence, immutable releases, health evidence and a rollback path.
