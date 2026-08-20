@@ -47,7 +47,7 @@ That means we can trace a running version back to a specific Git commit and Jenk
 
 ## Where we are today
 
-We have completed the core build path and are now adding the security checkpoint:
+We have completed the core build path and have now proved the security scanner can inspect images inside the isolated Jenkins Docker builder:
 
 - The Java game and its Gradle build are in GitHub.
 - Jenkins is running internally on TestServer.
@@ -59,10 +59,13 @@ We have completed the core build path and are now adding the security checkpoint
 - A dedicated `jenkins-ci` account exists for publishing images.
 - The TestServer firewall permits registry access from the Jenkins Docker network only; the registry still requires a username and password.
 - The Jenkins registry credential is stored in Jenkins, not in this repository.
-- Trivy version `0.72.0` is already installed on TestServer.
-- Trivy is not installed inside the Jenkins controller container, and we do not need to put it there.
-- The next validation is to run Trivy as its own container and let it inspect an image inside Jenkins’ isolated Docker builder.
-- After that works, the Trivy check will be added to the Jenkins pipeline before image publishing.
+- Trivy version `0.72.0` is available and has now been tested as a temporary container.
+- Trivy successfully connected to the same isolated Docker builder over TLS and scanned `homelab-defender:6`.
+- The Ubuntu package scan reported 0 HIGH/CRITICAL vulnerabilities.
+- A Go binary inside the image, `usr/bin/pebble`, reported 8 HIGH and 0 CRITICAL findings.
+- Running Trivy with `--exit-code 1` returned exit code `1`, proving the security policy can reject an image before publication.
+- The Trivy scan needed a `15m` timeout because the first full analysis exceeded the default timeout.
+- The security stage is not yet committed to the Jenkins pipeline. The next task is to remediate the vulnerable runtime component, rebuild, rescan and then add the proven gate to Jenkins.
 
 ## What is the new security check?
 
@@ -70,7 +73,7 @@ Building successfully does not automatically mean a Docker image is safe to rele
 
 That is where **Trivy** comes in.
 
-Trivy examines the built container image and reports known vulnerabilities. We are planning to make it a Jenkins **security gate**.
+Trivy examines the built container image and reports known vulnerabilities. We are making it a Jenkins **security gate**.
 
 The pipeline will become:
 
@@ -88,7 +91,7 @@ Publish to private registry
 
 The important word is **gate**. The scan is not just a report that somebody might forget to read. Jenkins will use Trivy's result to decide whether it is allowed to continue.
 
-The intended rule is:
+The rule is:
 
 ```text
 Security check passes
@@ -102,7 +105,7 @@ Pipeline stops
 Image is NOT published
 ```
 
-We intend to check `HIGH` and `CRITICAL` vulnerability findings and configure Trivy to return a failure code when the policy is breached. Jenkins understands that failure code and stops the later publish stage.
+We have now proved the failure side of that rule manually. Trivy scanned `HIGH` and `CRITICAL` findings in `homelab-defender:6`, found eight HIGH vulnerabilities and returned exit code `1` when configured with `--exit-code 1`. That is exactly the kind of result Jenkins can use to stop the later publish stage.
 
 ## Why run Trivy in a container?
 
@@ -122,7 +125,7 @@ Jenkins Docker builder
       └── homelab-defender:<build-number>
 ```
 
-Rather than installing more software permanently inside the Jenkins controller, we can start a temporary, known version of Trivy when a scan is needed.
+Rather than installing more software permanently inside the Jenkins controller, we start a temporary, known version of Trivy when a scan is needed.
 
 That gives us:
 
@@ -156,7 +159,20 @@ In plain English:
 - `TLS_VERIFY=1` means Jenkins verifies the secure connection rather than blindly trusting it.
 - `/certs/client` contains the client certificates used for that secure connection.
 
-The Trivy container will use the same private network and a read-only copy of the required client certificates so that it can inspect the image without weakening this boundary.
+The manual Trivy test used the same `homelab_apps` network, the same Docker host and a read-only mount of those client certificates. This proved the scanner can inspect the image without weakening the isolation boundary.
+
+## What did the first Trivy test find?
+
+The first successful scan of `homelab-defender:6` showed two distinct results:
+
+```text
+Ubuntu packages:   0 HIGH / CRITICAL
+usr/bin/pebble:    8 HIGH, 0 CRITICAL
+```
+
+The image therefore does not meet the planned HIGH/CRITICAL publication policy yet.
+
+That is useful evidence, not a failed project. The security control did exactly what it is supposed to do: it found a problem before the image reached the private registry. The next step is to remediate or replace the vulnerable runtime component, rebuild the image and scan it again.
 
 ## Why the registry needs a username and password
 
@@ -192,17 +208,16 @@ Later, Kubernetes will be told to run that exact version rather than an ambiguou
 
 ## What happens next
 
-The next task is deliberately small and testable:
+The scanner connection and failure behaviour are now proven. The next steps are:
 
-1. Start a Trivy `0.72.0` container from Jenkins.
-2. Connect it to the same isolated Docker builder using the existing TLS setup.
-3. Scan an existing `homelab-defender` image.
-4. Confirm Trivy can correctly return success or failure to Jenkins.
-5. Add a `Security Scan` stage between `Containerise` and `Publish image` in the `Jenkinsfile`.
-6. Run the complete gated pipeline.
-7. Confirm only an image that passes the gate reaches the private registry.
-8. Configure K3s to authenticate to the registry.
-9. Create a separate Kubernetes test namespace and deploy a known image.
+1. Remediate or replace the component responsible for the eight HIGH findings in `usr/bin/pebble`.
+2. Rebuild `homelab-defender` from the updated runtime/base image.
+3. Re-run Trivy and prove a compliant image can return a successful gate result.
+4. Add a `Security Scan` stage between `Containerise` and `Publish image` in the `Jenkinsfile`.
+5. Run the complete gated Jenkins pipeline.
+6. Confirm only an image that passes the gate reaches the private registry.
+7. Configure K3s to authenticate to the registry.
+8. Create a separate Kubernetes test namespace and deploy a known image.
 
 Only after the test deployment is dependable will we consider a Cloudflare-published game URL.
 
@@ -211,7 +226,7 @@ Only after the test deployment is dependable will we consider a Cloudflare-publi
 - Jenkins remains internal-only.
 - Jenkins does not receive TestServer's host Docker socket.
 - Jenkins-to-builder Docker traffic uses TLS.
-- The Trivy scanner will be temporary and versioned rather than permanently added to Jenkins.
+- The Trivy scanner is temporary and versioned rather than permanently added to Jenkins.
 - The scanner receives only the access needed to inspect the isolated Docker builder.
 - A failed security gate prevents the image publish stage from running.
 - Cloudflare will publish the game, not Jenkins, Kubernetes control pages or the registry.
@@ -234,5 +249,7 @@ Think of it as a small workshop:
 - **Cloudflare** is the public reception desk.
 
 The important change is that the box will not simply go from the workbench to the stockroom. It must pass the security inspector first.
+
+The first real inspection has now taken place, found a problem, and correctly rejected the image. That is exactly the behaviour this delivery path is being built to provide.
 
 Every hand-off is intentional, recorded and checked.
