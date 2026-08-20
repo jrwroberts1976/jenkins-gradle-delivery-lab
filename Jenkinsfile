@@ -4,11 +4,12 @@ pipeline {
   environment {
     REGISTRY = '192.168.2.220:5000'
     IMAGE_NAME = 'homelab-defender'
+    K3S_HOST = '192.168.2.195'
   }
 
   parameters {
     booleanParam(name: 'BUILD_CONTAINER', defaultValue: false, description: 'Build a Docker image after tests pass.')
-    booleanParam(name: 'PUBLISH_CONTAINER', defaultValue: false, description: 'Build and publish an immutable image to the private registry after tests pass.')
+    booleanParam(name: 'PUBLISH_CONTAINER', defaultValue: false, description: 'Build, scan, publish and deploy an immutable image to the K3s test environment.')
   }
 
   stages {
@@ -77,6 +78,34 @@ pipeline {
             docker tag "$image" "$target"
             docker push "$target"
             docker logout "$REGISTRY"
+          '''
+        }
+      }
+    }
+
+    stage('Deploy to K3s') {
+      when {
+        expression { return params.PUBLISH_CONTAINER }
+      }
+      steps {
+        withCredentials([
+          sshUserPrivateKey(
+            credentialsId: 'k3s-deploy-ssh',
+            keyFileVariable: 'K3S_SSH_KEY',
+            usernameVariable: 'K3S_SSH_USER'
+          )
+        ]) {
+          sh '''
+            set +x
+            install -d -m 0700 "$HOME/.ssh"
+
+            ssh \
+              -i "$K3S_SSH_KEY" \
+              -o BatchMode=yes \
+              -o ConnectTimeout=10 \
+              -o StrictHostKeyChecking=accept-new \
+              "$K3S_SSH_USER@$K3S_HOST" \
+              "deploy ${BUILD_NUMBER}"
           '''
         }
       }
