@@ -91,6 +91,7 @@ GitHub change
 - ✅ Game HTML served successfully through the Kubernetes Service
 - ✅ Reproducible Namespace/Deployment/Service manifest committed at `k8s/homelab-defender-test.yaml`
 - ✅ Deployment, verification and rollback procedure documented in `k8s/README.md`
+- ✅ Repository cloned onto `k3s-node-01` and the committed manifest reapplied successfully; Deployment and Service remained unchanged
 - ⏳ Decide whether Jenkins should deploy automatically after publication or keep deployment as a separate approval step
 - ⏳ Add a controlled external game route through Cloudflare
 - ⏳ Document monitoring and operational support
@@ -127,7 +128,9 @@ ok
 
 and the main page returned the Homelab Defender HTML.
 
-The exact working Namespace, Deployment and Service definition is now stored in `k8s/homelab-defender-test.yaml`. Operational apply, verification and rollback commands are documented in `k8s/README.md`.
+The exact working Namespace, Deployment and Service definition is stored in `k8s/homelab-defender-test.yaml`. Operational apply, verification and rollback commands are documented in `k8s/README.md`.
+
+The repository was then cloned directly onto `k3s-node-01` and the committed manifest reapplied from that checkout. Kubernetes reported the Deployment and Service as unchanged, confirming that the Git-managed manifest matches the live application resources.
 
 ## Current delivery boundary
 
