@@ -1,0 +1,120 @@
+#!/bin/bash
+set -Eeuo pipefail
+
+if [[ $# -ne 1 || ! "$1" =~ ^[0-9]+$ ]]; then
+  echo "Usage: deploy-homelab-defender BUILD_NUMBER" >&2
+  exit 64
+fi
+
+BUILD_NUMBER="$1"
+NAMESPACE="homelab-defender-test"
+DEPLOYMENT="homelab-defender"
+CONTAINER="homelab-defender"
+SERVICE="homelab-defender"
+IMAGE="192.168.2.220:5000/homelab-defender:${BUILD_NUMBER}"
+K3S="/usr/local/bin/k3s"
+
+CURRENT_IMAGE="$(
+  "$K3S" kubectl \
+    -n "$NAMESPACE" \
+    get deployment "$DEPLOYMENT" \
+    -o jsonpath='{.spec.template.spec.containers[?(@.name=="homelab-defender")].image}'
+)"
+
+if [[ -z "$CURRENT_IMAGE" ]]; then
+  echo "Could not determine current image." >&2
+  exit 1
+fi
+
+echo "Current image: $CURRENT_IMAGE"
+echo "Target image:  $IMAGE"
+
+verify_health() {
+  local service_ip response attempt
+
+  service_ip="$(
+    "$K3S" kubectl \
+      -n "$NAMESPACE" \
+      get service "$SERVICE" \
+      -o jsonpath='{.spec.clusterIP}'
+  )"
+
+  echo "Checking http://${service_ip}:8080/healthz"
+
+  for attempt in $(seq 1 15); do
+    response=""
+
+    if response="$(
+      /usr/bin/curl \
+        --fail \
+        --silent \
+        --show-error \
+        --max-time 5 \
+        "http://${service_ip}:8080/healthz" 2>&1
+    )"; then
+      if [[ "$response" == "ok" ]]; then
+        echo "Health check passed on attempt ${attempt}/15."
+        return 0
+      fi
+    fi
+
+    echo "Health check attempt ${attempt}/15 not ready: ${response:-no response}"
+
+    if [[ "$attempt" -lt 15 ]]; then
+      sleep 2
+    fi
+  done
+
+  echo "Health check failed after 15 attempts." >&2
+  return 1
+}
+
+if [[ "$CURRENT_IMAGE" == "$IMAGE" ]]; then
+  echo "Requested image is already deployed."
+  verify_health
+  exit 0
+fi
+
+rollback() {
+  echo "Deployment failed. Rolling back to $CURRENT_IMAGE"
+
+  "$K3S" kubectl \
+    -n "$NAMESPACE" \
+    set image \
+    "deployment/${DEPLOYMENT}" \
+    "${CONTAINER}=${CURRENT_IMAGE}"
+
+  "$K3S" kubectl \
+    -n "$NAMESPACE" \
+    rollout status \
+    "deployment/${DEPLOYMENT}" \
+    --timeout=120s
+
+  echo "Rollback completed."
+}
+
+trap 'rc=$?; if [[ $rc -ne 0 ]]; then rollback || true; fi; exit $rc' EXIT
+
+"$K3S" kubectl \
+  -n "$NAMESPACE" \
+  set image \
+  "deployment/${DEPLOYMENT}" \
+  "${CONTAINER}=${IMAGE}"
+
+"$K3S" kubectl \
+  -n "$NAMESPACE" \
+  annotate deployment "$DEPLOYMENT" \
+  "kubernetes.io/change-cause=Jenkins build ${BUILD_NUMBER}" \
+  --overwrite
+
+"$K3S" kubectl \
+  -n "$NAMESPACE" \
+  rollout status \
+  "deployment/${DEPLOYMENT}" \
+  --timeout=120s
+
+verify_health
+
+trap - EXIT
+
+echo "Deployment of ${IMAGE} completed successfully."
