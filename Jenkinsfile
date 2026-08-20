@@ -30,7 +30,7 @@ pipeline {
         expression { return params.BUILD_CONTAINER || params.PUBLISH_CONTAINER }
       }
       steps {
-        sh 'docker build --tag ' + env.IMAGE_NAME + ':' + env.BUILD_NUMBER + ' .'
+        sh 'docker build --pull --tag ' + env.IMAGE_NAME + ':' + env.BUILD_NUMBER + ' .'
       }
     }
 
