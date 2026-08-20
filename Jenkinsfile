@@ -34,6 +34,27 @@ pipeline {
       }
     }
 
+    stage('Security Scan') {
+      when {
+        expression { return params.BUILD_CONTAINER || params.PUBLISH_CONTAINER }
+      }
+      steps {
+        sh '''
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v trivy-cache:/root/.cache/trivy \
+            aquasec/trivy:0.72.0 \
+            image \
+            --timeout 15m \
+            --skip-version-check \
+            --scanners vuln \
+            --severity HIGH,CRITICAL \
+            --exit-code 1 \
+            "${IMAGE_NAME}:${BUILD_NUMBER}"
+        '''
+      }
+    }
+
     stage('Publish image') {
       when {
         expression { return params.PUBLISH_CONTAINER }
