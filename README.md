@@ -17,6 +17,7 @@ The end product is a small browser game where players respond to common homelab 
 - Authenticated publication to a private Docker registry
 - Authenticated K3s/containerd pulls from that registry
 - Kubernetes Deployment, Service and health probes
+- Reproducible Kubernetes manifests stored in Git
 - Traceable immutable releases using Jenkins build numbers
 
 ## Delivery flow
@@ -61,6 +62,7 @@ GitHub change
 - K3s reads registry credentials and the HTTP endpoint from `/etc/rancher/k3s/registries.yaml`.
 - No registry passwords, TLS client certificates, kubeconfig files or deployment secrets are committed to this repository.
 - Images are tagged with Jenkins build numbers instead of `latest`, so a deployment identifies a specific release.
+- Kubernetes deployment state is represented in Git under `k8s/`; credentials remain outside the repository.
 
 ## Current status
 
@@ -87,8 +89,8 @@ GitHub change
 - ✅ ClusterIP Service created
 - ✅ `/healthz` returned HTTP 200 with `ok`
 - ✅ Game HTML served successfully through the Kubernetes Service
-- ⏳ Commit the Kubernetes deployment manifest to the repository instead of relying on an ad-hoc apply command
-- ⏳ Add an explicit rollback procedure and deployment verification commands
+- ✅ Reproducible Namespace/Deployment/Service manifest committed at `k8s/homelab-defender-test.yaml`
+- ✅ Deployment, verification and rollback procedure documented in `k8s/README.md`
 - ⏳ Decide whether Jenkins should deploy automatically after publication or keep deployment as a separate approval step
 - ⏳ Add a controlled external game route through Cloudflare
 - ⏳ Document monitoring and operational support
@@ -113,7 +115,7 @@ The pull then succeeded:
 Image is up to date for sha256:ef37d59b6c41d99394f053d5f02962e07136f76d7080ab049e5403ce80a8df3e
 ```
 
-The deployment in namespace `homelab-defender-test` rolled out successfully. The application already exposes `/healthz`, so Kubernetes readiness and liveness probes can use the application itself as health evidence.
+The deployment in namespace `homelab-defender-test` rolled out successfully. The application already exposes `/healthz`, so Kubernetes readiness and liveness probes use the application itself as health evidence.
 
 The first service-level validation returned:
 
@@ -124,6 +126,8 @@ ok
 ```
 
 and the main page returned the Homelab Defender HTML.
+
+The exact working Namespace, Deployment and Service definition is now stored in `k8s/homelab-defender-test.yaml`. Operational apply, verification and rollback commands are documented in `k8s/README.md`.
 
 ## Current delivery boundary
 
@@ -177,9 +181,21 @@ The security stage runs pinned Trivy `0.72.0` with:
 
 A finding that breaches policy stops the pipeline before publication.
 
+## Kubernetes deployment
+
+The reproducible test deployment is stored at:
+
+```text
+k8s/homelab-defender-test.yaml
+```
+
+It defines the `homelab-defender-test` Namespace, the application Deployment, a private ClusterIP Service, and readiness/liveness probes against `/healthz`.
+
+Deployment, verification and rollback instructions are in [`k8s/README.md`](k8s/README.md).
+
 ## Next engineering milestone
 
-The next useful step is to make the successful Kubernetes deployment reproducible by storing its Namespace/Deployment/Service manifest in this repository. After that, add deployment verification and rollback instructions and decide whether deployment should remain a manual release action or become a separately gated Jenkins stage.
+The next design decision is whether a successful Jenkins publish should automatically deploy to the test namespace or whether deployment should remain a distinct, explicitly approved release action. Keeping those stages separate preserves a clear approval boundary; automating them would make the pipeline closer to continuous delivery.
 
 ## Why this exists
 
