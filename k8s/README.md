@@ -4,6 +4,24 @@ This directory contains the reproducible Kubernetes definition for the Homelab D
 
 The manifest deliberately does **not** contain registry credentials. `k3s-node-01` obtains private-registry endpoint and authentication settings from `/etc/rancher/k3s/registries.yaml`.
 
+## First-time checkout on k3s-node-01
+
+If this repository has not yet been cloned on `k3s-node-01`, create the projects directory and clone the public repository:
+
+```bash
+mkdir -p ~/projects
+cd ~/projects
+git clone https://github.com/jrwroberts1976/jenkins-gradle-delivery-lab.git
+cd jenkins-gradle-delivery-lab
+```
+
+For later updates, use:
+
+```bash
+cd ~/projects/jenkins-gradle-delivery-lab
+git pull
+```
+
 ## Deploy
 
 From a checkout of this repository on `k3s-node-01`:
