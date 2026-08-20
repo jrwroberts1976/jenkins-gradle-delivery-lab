@@ -1,0 +1,53 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: homelab-defender-test
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: homelab-defender
+  namespace: homelab-defender-test
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: homelab-defender
+  template:
+    metadata:
+      labels:
+        app: homelab-defender
+    spec:
+      containers:
+        - name: homelab-defender
+          image: 192.168.2.220:5000/homelab-defender:12
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: homelab-defender
+  namespace: homelab-defender-test
+spec:
+  type: ClusterIP
+  selector:
+    app: homelab-defender
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
