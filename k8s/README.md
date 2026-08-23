@@ -24,19 +24,27 @@ cd ~/projects/jenkins-gradle-delivery-lab
 git pull
 ```
 
-## Baseline apply
+## Authoritative Kubernetes desired state
 
-Use the manifest to create or reconcile the Kubernetes object structure:
+The Namespace, Deployment, Service, health probes and approved image digest are maintained in:
+
+`jrwroberts1976/kubernetes-homelab/applications/homelab-defender-test`
+
+Validate and apply that Kustomization from the Kubernetes repository:
 
 ```bash
-sudo k3s kubectl apply -f k8s/homelab-defender-test.yaml
+cd ~/projects/kubernetes-homelab
+sudo k3s kubectl kustomize applications/homelab-defender-test \
+  >/var/tmp/homelab-defender-managed.yaml
+sudo k3s kubectl apply --dry-run=server \
+  --filename /var/tmp/homelab-defender-managed.yaml
+sudo k3s kubectl apply \
+  --filename /var/tmp/homelab-defender-managed.yaml
 sudo k3s kubectl -n homelab-defender-test \
   rollout status deployment/homelab-defender --timeout=120s
 ```
 
-The image tag contained in the YAML is a bootstrap/baseline value. After automated delivery is enabled, normal releases are performed by Jenkins rather than by manually editing and applying the image tag in this file.
-
-Because `kubectl apply` reconciles all fields in the manifest, manually reapplying an older baseline can change the live image back to the image recorded in the YAML. Check the current running release before using the baseline as a recovery action.
+Do not restore the retired manifest from this repository. Confirm that the approved tag and digest in `kubernetes-homelab` match the intended release before applying it.
 
 ## Automated release
 
@@ -177,10 +185,10 @@ A previous revision only exists after at least one later rollout has replaced th
 
 ## Source of truth and release state
 
-Git is the source of truth for the deployment **structure and automation**:
+Desired-state ownership is split deliberately:
 
-- Namespace, Deployment structure, Service and probes: `k8s/homelab-defender-test.yaml`
-- Jenkins delivery logic: `Jenkinsfile`
-- Restricted deployment implementation: `ops/deploy-homelab-defender`
+- Namespace, Deployment, Service, probes and approved image digest: `jrwroberts1976/kubernetes-homelab/applications/homelab-defender-test`
+- Application source, tests and Jenkins delivery logic: `Jenkinsfile`
+- Restricted node-side deployment implementation: `ops/deploy-homelab-defender`
 
-The live release number is supplied by Jenkins at deployment time and is visible in the Deployment image field and the `kubernetes.io/change-cause` annotation. This avoids committing a new manifest change purely to record every Jenkins build number while still keeping the release traceable.
+The Jenkins deployment path uses the restricted `jenkins-deploy` SSH account and accepts only `deploy BUILD_NUMBER`. During the transition to Git-driven release updates, a successful Jenkins deployment can advance the live image ahead of the desired-state manifest. Reconcile the newly approved tag and digest into `kubernetes-homelab` after each release, and never apply an older manifest over a newer healthy deployment.
