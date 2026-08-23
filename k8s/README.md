@@ -1,10 +1,8 @@
 # K3s test deployment
 
-This directory contains the version-controlled Kubernetes baseline for the Homelab Defender test deployment.
+This directory documents the Homelab Defender build and controlled deployment workflow.
 
-The manifest deliberately does **not** contain registry credentials. `k3s-node-01` obtains private-registry endpoint and authentication settings from `/etc/rancher/k3s/registries.yaml`.
-
-The baseline YAML defines the Namespace, Deployment structure, ClusterIP Service and health probes. The live application image tag is selected by the Jenkins deployment stage using the Jenkins build number.
+The authoritative Namespace, Deployment, Service, health probes and approved image digest are maintained in `jrwroberts1976/kubernetes-homelab/applications/homelab-defender-test`. Registry credentials are not stored in either repository; `k3s-node-01` obtains its private-registry configuration from `/etc/rancher/k3s/registries.yaml`.
 
 ## First-time checkout on k3s-node-01
 
