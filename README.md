@@ -1,10 +1,10 @@
 # Homelab Defender — Build & Delivery Lab
 
-A practical learning project for Java, Gradle, Jenkins, Docker, container security and Kubernetes.
+A practical learning project for Java, Gradle, Jenkins, Docker, container security, Kubernetes and operational monitoring.
 
-New to the project? Read the [Beginner’s Guide](BEGINNERS_GUIDE.md) for a plain-English explanation, and use the [Glossary](GLOSSARY.md) for the terms used throughout the lab.
+New to the project? Read the [Beginner’s Guide](BEGINNERS_GUIDE.md) for a plain-English explanation and use the [Glossary](GLOSSARY.md) for the terms used throughout the lab.
 
-The end product is a small browser game where players respond to common homelab incidents. The game is deliberately modest; the main purpose is learning and proving a complete, supportable software delivery path.
+The end product is a small browser game where players respond to common homelab incidents. The game is deliberately modest; the main purpose is learning and proving a complete, supportable software delivery path from source to a monitored Kubernetes workload.
 
 ## What this project demonstrates
 
@@ -13,14 +13,66 @@ The end product is a small browser game where players respond to common homelab 
 - Jenkins Pipeline as Code through a versioned `Jenkinsfile`
 - Docker image construction using an isolated Docker-in-Docker builder
 - Container vulnerability scanning with Trivy
-- A security gate that blocks vulnerable images before publication
+- A HIGH/CRITICAL security gate that blocks vulnerable images before publication
 - Authenticated publication to a private Docker registry
 - Authenticated K3s/containerd pulls from that registry
-- Automated Jenkins deployment into Kubernetes
-- Kubernetes Deployment, Service and health probes
+- Restricted Jenkins deployment into Kubernetes
+- Kubernetes Deployment, Service, readiness/liveness probes and service-level health verification
 - Automatic rollback when deployment verification fails
-- Reproducible Kubernetes desired state stored in the dedicated `kubernetes-homelab` repository
-- Traceable releases using Jenkins build numbers
+- Git-owned Kubernetes desired state with approved tag-plus-digest releases
+- Prometheus/Grafana monitoring of deployment availability, pod readiness and new restarts
+- Traceable releases using Jenkins build numbers and immutable image digests
+
+## Current validated release — build 15
+
+Jenkins build `15` is the current validated healthy release.
+
+Approved immutable identity:
+
+```text
+192.168.2.220:5000/homelab-defender:15@sha256:2154a1881acc63db852dbeebc7daf5890a1c9527c4b70837b2ad33fb76ad940b
+```
+
+Build 15 used application source revision:
+
+```text
+d0e8e8b Merge Kubernetes desired-state documentation alignment
+```
+
+The release ran with:
+
+```text
+BUILD_CONTAINER=false
+PUBLISH_CONTAINER=true
+```
+
+`PUBLISH_CONTAINER=true` enables the complete gated release path, so build 15 exercised:
+
+```text
+Test
+  → Package
+  → Containerise
+  → Security Scan
+  → Publish image
+  → Deploy to K3s
+  → rollout and /healthz verification
+```
+
+Jenkins recorded `SUCCESS` after `1013344 ms`.
+
+Independent post-release validation confirmed:
+
+- Deployment `homelab-defender`: `1/1` available;
+- build-15 pod: `Running` with `0` restarts;
+- Service: private ClusterIP on port `8080`;
+- running image digest: `sha256:2154a1881acc63db852dbeebc7daf5890a1c9527c4b70837b2ad33fb76ad940b`;
+- Prometheus observed the build-15 image identity;
+- `Homelab Defender Deployment Unavailable` expression = `0`;
+- `Homelab Defender New Container Restart` expression = `0`.
+
+The approved tag and digest were reconciled into the authoritative Kubernetes repository through `jrwroberts1976/kubernetes-homelab#11`, merge commit `1565663aa0ed1584a09bdc0761ce5e143bf61cce`.
+
+Operational release evidence is recorded in `jrwroberts1976/home-lab-docs/jenkins/homelab-defender-build-15-validation-2026-08-26.md`.
 
 ## Delivery flow
 
@@ -28,15 +80,18 @@ The end product is a small browser game where players respond to common homelab 
 GitHub change
   → Jenkins build
   → Gradle test and package
-  → Docker image build
+  → isolated Docker image build
   → Trivy HIGH/CRITICAL vulnerability gate
-  → Authenticated private registry
-  → Restricted SSH deployment command
-  → Authenticated K3s image pull
+  → authenticated private registry
+  → restricted SSH deployment command
+  → authenticated K3s/containerd image pull
   → Kubernetes rolling deployment
+  → readiness/liveness probes
   → Service-level /healthz verification
-  → Automatic rollback on failure
-  → Future public release through Cloudflare
+  → automatic rollback on failure
+  → Prometheus/Grafana operational observation
+  → approved tag/digest reconciliation into kubernetes-homelab
+  → future public release through Cloudflare
 ```
 
 ## Platform design
@@ -50,6 +105,9 @@ GitHub change
 | Private Docker registry | TestServer TCP 5000 | Authenticated image hand-off between Jenkins and K3s |
 | Restricted deployment endpoint | `k3s-node-01` SSH | Allows Jenkins to request only a Homelab Defender deployment by build number |
 | Kubernetes runtime | `k3s-node-01` | Runs the isolated test deployment |
+| Kubernetes desired state | `kubernetes-homelab` | Owns Namespace, Deployment, Service, probes and approved image tag/digest |
+| State metrics | kube-state-metrics | Exposes deployment and pod state to Prometheus |
+| Operational monitoring | Prometheus + Grafana on `ids-01` | Dashboard and Defender-specific availability/restart alerts |
 | Public access | Cloudflare | Planned public game route; Jenkins and the registry remain private |
 
 ## Security and operating principles
@@ -58,147 +116,75 @@ GitHub change
 - Jenkins builds images through an isolated Docker-in-Docker daemon rather than TestServer's host Docker socket.
 - Jenkins connects to the builder over TLS using `tcp://docker:2376` and client certificates.
 - The Jenkins and Docker builder containers share the internal `homelab_apps` Docker network.
-- Trivy `0.72.0` is pinned in the pipeline and runs as a temporary container rather than being installed permanently in Jenkins.
+- Trivy `0.72.0` is pinned in the pipeline and runs as a temporary container.
 - The Trivy gate scans `HIGH` and `CRITICAL` findings and returns a non-zero exit code when policy is breached, stopping publication.
-- The final runtime image uses `eclipse-temurin:21-jre-jammy`, selected after the previous runtime exposed HIGH findings in `usr/bin/pebble`.
-- The private registry runs as the TestServer `docker-registry` host service and uses htpasswd Basic authentication.
-- Jenkins publishes with the dedicated `jenkins-ci` registry account. K3s uses a separate registry account for runtime pulls.
-- TestServer firewall access to TCP 5000 is restricted to required sources rather than the whole LAN.
-- K3s reads registry credentials and the HTTP endpoint from `/etc/rancher/k3s/registries.yaml`.
-- Jenkins deployment uses a dedicated SSH key and the `jenkins-deploy` account. The key is constrained by a forced command and cannot be used as a normal interactive shell.
-- The forced command validates a numeric build number and may invoke only the root-owned Homelab Defender deployment script through a narrow sudo rule.
-- No registry passwords, TLS client certificates, kubeconfig files or deployment secrets are committed to this repository.
-- Images are tagged with Jenkins build numbers instead of `latest`, so a deployment identifies a specific Jenkins release.
-- The authoritative Kubernetes desired state, including the approved image digest, is stored in `jrwroberts1976/kubernetes-homelab`; this repository retains the Jenkins delivery workflow and restricted deployment implementation.
+- The final runtime image uses `eclipse-temurin:21-jre-jammy`.
+- The private registry uses htpasswd Basic authentication.
+- Jenkins publishes with the dedicated `jenkins-ci` registry account; K3s uses a separate runtime pull identity.
+- TestServer firewall access to TCP 5000 is restricted to required sources.
+- K3s reads registry credentials and its HTTP endpoint from `/etc/rancher/k3s/registries.yaml`.
+- Jenkins deployment uses a dedicated `jenkins-deploy` SSH account constrained by a forced command and narrow sudo rule.
+- No registry passwords, TLS client certificates, kubeconfig files or deployment secrets are committed here.
+- Images use Jenkins build-number tags instead of `latest`.
+- The authoritative Kubernetes desired state, including the approved immutable digest, lives in `jrwroberts1976/kubernetes-homelab`.
 
-## Current status
+## Trivy cache behaviour
 
-- ✅ Public GitHub repository created
-- ✅ Java 21 Gradle project and Gradle Wrapper committed
-- ✅ Homelab Defender playable application committed
-- ✅ Jenkins controller running internally on TestServer
-- ✅ Jenkins Multibranch Pipeline connected to `main`
-- ✅ Gradle test and package stages validated
-- ✅ Jenkins builds `homelab-defender:<build-number>` images in the isolated builder
-- ✅ Vulnerable runtime behaviour demonstrated with `homelab-defender:6` and 8 HIGH findings
-- ✅ Runtime remediated to `eclipse-temurin:21-jre-jammy`
-- ✅ Clean image behaviour demonstrated with 0 HIGH/CRITICAL findings
-- ✅ Automated `Security Scan` stage added to the Jenkinsfile
-- ✅ Trivy gate proven to fail policy-breaking images and pass compliant images
-- ✅ Authenticated registry publishing proven end to end
-- ✅ `homelab-defender:12` published successfully to `192.168.2.220:5000`
-- ✅ Registry catalog/tag query confirmed build `12` exists
-- ✅ `k3s-node-01` firewall path to the registry validated
-- ✅ K3s private-registry configuration loaded successfully
-- ✅ containerd authenticated to the HTTP registry and pulled `homelab-defender:12`
-- ✅ Isolated namespace `homelab-defender-test` created
-- ✅ Kubernetes Deployment and private ClusterIP Service created
-- ✅ `/healthz` returned HTTP 200 with `ok`
-- ✅ Game HTML served successfully through the Kubernetes Service
-- ✅ Initial Namespace/Deployment/Service baseline created here, then migrated to `jrwroberts1976/kubernetes-homelab/applications/homelab-defender-test` as the authoritative desired state
-- ✅ Deployment, verification and rollback procedure documented in `k8s/README.md`
-- ✅ Restricted `jenkins-deploy` SSH path proven from Jenkins/TestServer to `k3s-node-01`
-- ✅ Build 13 proved automatic rollback: publish and rollout succeeded, a transient service-level health check failed, and the deployment returned safely to build 12
-- ✅ Deployment verification improved to retry `/healthz` before declaring failure
-- ✅ Jenkins build 14 completed the first fully automated source-to-healthy-Kubernetes release
-- ✅ Build 14 passed tests, packaging and Trivy with 0 HIGH/CRITICAL findings
-- ✅ Build 14 published `192.168.2.220:5000/homelab-defender:14`
-- ✅ Build 14 rolled out automatically to K3s and `/healthz` passed on attempt 1/15
-- ⏳ Add monitoring and operational support for the running Kubernetes workload
-- ⏳ Add a controlled external game route through Cloudflare
-- ⏳ Replace Docker's deprecated legacy builder with BuildKit/buildx
+Build 15 performed a legitimate vulnerability-database refresh rather than exposing a broken cache.
 
-## Evidence from the first gated release
+During the security stage the primary vulnerability-DB mirror returned `BLOB_UNKNOWN`; Trivy automatically fell back to `ghcr.io/aquasecurity/trivy-db:2` and completed successfully. The Java database was also refreshed.
 
-Jenkins build 12 completed the first gated publication path and pushed:
+The persistent DinD volume `trivy-cache` was verified after the build:
+
+```text
+/root/.cache/trivy/db       1.2G
+/root/.cache/trivy/java-db  1.4G
+/root/.cache/trivy/fanal    1.0M
+Total                       2.6G
+```
+
+Recorded metadata showed:
+
+```text
+Vulnerability DB downloaded: 2026-08-26T07:28:38Z
+Vulnerability DB next update: 2026-08-27T07:03:22Z
+Java DB downloaded:          2026-08-26T07:35:54Z
+Java DB next update:         2026-08-29T01:07:43Z
+```
+
+No Jenkinsfile change is required from this observation.
+
+## Release history
+
+### Build 12 — first gated publication
+
+Build 12 completed the first successful security-gated publication to the private registry and proved K3s/containerd could authenticate to and pull the private image.
 
 ```text
 192.168.2.220:5000/homelab-defender:12
 ```
 
-The image passed the automated Trivy HIGH/CRITICAL gate before the publish stage. Jenkins authenticated to the registry only during publication and logged out afterwards.
+### Build 13 — automatic rollback proof
 
-K3s initially attempted HTTPS because the private-registry configuration had not yet been loaded by the running service. After restarting K3s, the service reported that it was using `/etc/rancher/k3s/registries.yaml`, and containerd generated an HTTP registry host entry plus authentication configuration.
+Build 13 was the first automated deployment attempt. Build, scan, publish and rollout succeeded, but the first Service-level health request received a transient connection reset. The deployment helper restored build 12 and Jenkins marked build 13 failed. This proved the automatic rollback path.
 
-The pull then succeeded:
+The health verifier was then improved to retry `/healthz` up to 15 times before declaring a release unhealthy.
 
-```text
-Image is up to date for sha256:ef37d59b6c41d99394f053d5f02962e07136f76d7080ab049e5403ce80a8df3e
-```
+### Build 14 — first fully automated end-to-end release
 
-The deployment in namespace `homelab-defender-test` rolled out successfully. The application already exposes `/healthz`, so Kubernetes readiness and liveness probes use the application itself as health evidence.
+Build 14 was the first completely hands-off source-to-healthy-Kubernetes release.
 
-The first service-level validation returned:
-
-```text
-HTTP/1.1 200 OK
-
-ok
-```
-
-and the main page returned the Homelab Defender HTML.
-
-## Evidence from automatic rollback
-
-Jenkins build 13 was the first automated deployment attempt. The build, Trivy scan, registry push and Kubernetes rollout all succeeded, but the first ClusterIP health request returned a transient connection reset.
-
-The root-owned deployment script treated that as a failed release and automatically restored:
-
-```text
-192.168.2.220:5000/homelab-defender:12
-```
-
-Kubernetes rolled the previous image back successfully and Jenkins marked build 13 as failed. This proved that deployment failure does not leave an unverified release in service.
-
-The health verifier was then changed to retry `/healthz` up to 15 times with a short delay, allowing the Service datapath time to converge while still failing and rolling back if the application never becomes reachable.
-
-## First fully automated end-to-end release
-
-Jenkins build 14 proved the complete delivery chain without a manual Kubernetes deployment step.
-
-The build checked out commit `cc1b25a4821e07fa647b3f807c8f2c8cd69a99cc`, ran the Gradle tests and package stages, built `homelab-defender:14`, and scanned it with Trivy. The security report contained 0 HIGH/CRITICAL findings.
-
-Jenkins then authenticated to the private registry and pushed:
+It passed Gradle tests, packaging and the Trivy HIGH/CRITICAL gate, published:
 
 ```text
 192.168.2.220:5000/homelab-defender:14
 ```
 
-The `Deploy to K3s` stage used the restricted `jenkins-deploy` SSH credential to request build 14. The deployment script changed the Deployment image from build 12 to build 14, waited for the Kubernetes rollout, then checked the application through the ClusterIP Service.
+and completed the restricted K3s deployment with `/healthz` passing on attempt `1/15`.
 
-The final verification was:
+### Build 15 — first release validated through monitoring and Git reconciliation
 
-```text
-Health check passed on attempt 1/15.
-Deployment of 192.168.2.220:5000/homelab-defender:14 completed successfully.
-Finished: SUCCESS
-```
-
-This proves the current end-to-end path:
-
-```text
-GitHub
-   ↓
-Jenkins
-   ↓
-Gradle tests + package
-   ↓
-isolated Docker build
-   ↓
-Trivy security gate
-   ↓
-authenticated private-registry publish
-   ↓
-restricted deployment request
-   ↓
-K3s/containerd authenticated pull
-   ↓
-Kubernetes rollout
-   ↓
-ClusterIP /healthz verification
-   ↓
-SUCCESS
-```
+Build 15 repeated the complete automated release path while the dedicated Defender dashboard and alert rules were live. The resulting pod was healthy with zero restarts, both Defender alert expressions remained zero, the runtime digest was independently verified, and the approved tag-plus-digest was reconciled into `kubernetes-homelab`.
 
 ## Jenkins pipeline
 
@@ -220,7 +206,7 @@ Deploy to K3s
 
 `BUILD_CONTAINER=true` builds and scans an image without publishing or deploying it.
 
-`PUBLISH_CONTAINER=true` requests the complete gated release path: build, scan, authenticated publish, restricted deployment, rollout wait and service-level health verification. A failed deployment or health check returns Jenkins to failure and the deployment script attempts to restore the previously running image.
+`PUBLISH_CONTAINER=true` requests the complete gated release path: build, scan, authenticated publish, restricted deployment, rollout wait and service-level health verification. A failed deployment or health check returns Jenkins to failure and the deployment helper attempts to restore the previously running image.
 
 The security stage runs pinned Trivy `0.72.0` with:
 
@@ -234,7 +220,7 @@ The security stage runs pinned Trivy `0.72.0` with:
 
 A finding that breaches policy stops the pipeline before publication.
 
-## Kubernetes deployment
+## Kubernetes deployment and source of truth
 
 The authoritative Kubernetes desired state is stored in:
 
@@ -242,24 +228,72 @@ The authoritative Kubernetes desired state is stored in:
 jrwroberts1976/kubernetes-homelab/applications/homelab-defender-test
 ```
 
-That Kustomization owns the `homelab-defender-test` Namespace, application Deployment, private ClusterIP Service, readiness/liveness probes against `/healthz`, and the approved image tag and digest.
+That Kustomization owns the `homelab-defender-test` Namespace, application Deployment, private ClusterIP Service, readiness/liveness probes against `/healthz`, and approved release tag/digest.
 
-The Jenkins release path can advance the running Deployment after a gated build. After a release is approved, its tag and digest must be reconciled back into `kubernetes-homelab` so Git remains the authoritative desired state. Do not restore the retired duplicate manifest in this repository.
+The Jenkins release path can temporarily advance the live Deployment by build tag. After a release is validated, its tag and digest must be reconciled into `kubernetes-homelab` so Git remains authoritative. Never apply an older desired-state image over a newer healthy Jenkins deployment; reconcile Git first.
 
 Deployment, verification, reconciliation and rollback instructions are in [`k8s/README.md`](k8s/README.md).
 
-The root-owned deployment implementation used by the restricted Jenkins SSH path is versioned at:
+The restricted node-side implementation is versioned at:
 
 ```text
 ops/deploy-homelab-defender
 ```
 
-## Next engineering milestone
+## Monitoring
 
-The core delivery lab is now end to end. The next useful work is operational rather than adding another delivery stage: monitor the Kubernetes workload, surface failed/restarted pods and unhealthy deployments in the existing monitoring stack, and then decide how the game should be exposed externally through a controlled route.
+The Homelab Defender monitoring path is operational:
 
-A separate technical cleanup is to replace Docker's deprecated legacy builder with BuildKit/buildx.
+```text
+Homelab Defender on k3s-node-01
+        ↓
+kube-state-metrics 192.168.2.211:8080
+        ↓
+Prometheus on ids-01
+        ↓
+Grafana on ids-01
+```
+
+Dedicated Grafana objects:
+
+```text
+Dashboard: Homelab Defender Kubernetes Operations
+Dashboard UID: homelab-defender-k8s
+
+Alert: Homelab Defender Deployment Unavailable
+Alert UID: ffwbnisgmg4cgb
+
+Alert: Homelab Defender New Container Restart
+Alert UID: afwbnisiruz28f
+```
+
+The current healthy release produces no Defender alert instance. A synthetic firing/email-delivery exercise has not been performed for these two service-specific rules.
+
+## Current status
+
+- ✅ End-to-end Gradle/Jenkins/container delivery path operational
+- ✅ HIGH/CRITICAL Trivy gate operational
+- ✅ Authenticated private registry publication and K3s pull operational
+- ✅ Restricted Jenkins deployment and automatic rollback proven
+- ✅ Git-owned Kubernetes desired state established
+- ✅ Build 14 proved the first fully automated healthy release
+- ✅ Build 15 validated the full release path with runtime digest verification
+- ✅ Build 15 reconciled to immutable Git desired state
+- ✅ Dedicated Grafana dashboard deployed and validated
+- ✅ Defender availability and restart alert rules deployed and healthy
+- ✅ Persistent Trivy cache verified
+- ⏳ Add a controlled external game route through Cloudflare
+- ⏳ Replace Docker's deprecated legacy builder with BuildKit/buildx
+- ⏳ Complete remaining Jenkins controller/data recovery and source-ownership documentation
+
+## Next engineering milestones
+
+The delivery and operational monitoring paths are now established. The next useful improvements are:
+
+1. expose the game through a controlled Cloudflare route without exposing Jenkins or the registry;
+2. replace Docker's deprecated legacy builder with BuildKit/buildx;
+3. complete Jenkins controller/data recovery procedures and bring remaining host-specific Jenkins runtime definitions under controlled source ownership.
 
 ## Why this exists
 
-The aim is to learn modern build and delivery practices without pretending that a pipeline alone creates reliable delivery. A useful delivery path has protected credentials, clear boundaries, test evidence, security evidence, versioned releases, health evidence and a rollback path.
+The aim is to learn modern build and delivery practices without pretending that a pipeline alone creates reliable delivery. A useful delivery path has protected credentials, clear ownership boundaries, test evidence, security evidence, immutable release identity, health evidence, monitoring evidence and a rollback path.
