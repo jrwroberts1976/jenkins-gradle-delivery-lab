@@ -242,15 +242,16 @@ This is safer than using an ambiguous moving `latest` tag because the running im
 
 ## Git and the live release version
 
-The Kubernetes files in Git define the **baseline structure** of the environment: Namespace, Deployment shape, Service and probes.
+The authoritative Kubernetes files live in `jrwroberts1976/kubernetes-homelab/applications/homelab-defender-test`. They define the desired Namespace, Deployment, Service, health probes, and approved image tag and digest.
 
-The actual live image number is supplied by Jenkins at release time. That means the structure is version-controlled in Git while the current release is traceable through:
+Jenkins can advance the running image during a gated release. The resulting release is traceable through:
 
 - the Jenkins build number
 - the Deployment image field
 - the `kubernetes.io/change-cause` annotation
+- the approved tag and digest recorded in `kubernetes-homelab`
 
-This distinction matters because blindly reapplying an older baseline YAML can set the image back to the tag stored in that file. Normal releases should now go through Jenkins.
+After a release is approved, its tag and digest should be reconciled into `kubernetes-homelab` so Git remains the authoritative desired state. Before applying Kubernetes desired state, confirm that it represents the intended release rather than an older image.
 
 ## The current delivery chain
 

@@ -19,7 +19,7 @@ The end product is a small browser game where players respond to common homelab 
 - Automated Jenkins deployment into Kubernetes
 - Kubernetes Deployment, Service and health probes
 - Automatic rollback when deployment verification fails
-- Reproducible Kubernetes baseline manifests stored in Git
+- Reproducible Kubernetes desired state stored in the dedicated `kubernetes-homelab` repository
 - Traceable releases using Jenkins build numbers
 
 ## Delivery flow
@@ -69,7 +69,7 @@ GitHub change
 - The forced command validates a numeric build number and may invoke only the root-owned Homelab Defender deployment script through a narrow sudo rule.
 - No registry passwords, TLS client certificates, kubeconfig files or deployment secrets are committed to this repository.
 - Images are tagged with Jenkins build numbers instead of `latest`, so a deployment identifies a specific Jenkins release.
-- Git stores the Kubernetes baseline structure under `k8s/`; Jenkins supplies the live release image tag during automated deployment.
+- The authoritative Kubernetes desired state, including the approved image digest, is stored in `jrwroberts1976/kubernetes-homelab`; this repository retains the Jenkins delivery workflow and restricted deployment implementation.
 
 ## Current status
 
@@ -95,7 +95,7 @@ GitHub change
 - ✅ Kubernetes Deployment and private ClusterIP Service created
 - ✅ `/healthz` returned HTTP 200 with `ok`
 - ✅ Game HTML served successfully through the Kubernetes Service
-- ✅ Reproducible Namespace/Deployment/Service baseline committed at `k8s/homelab-defender-test.yaml`
+- ✅ Initial Namespace/Deployment/Service baseline created here, then migrated to `jrwroberts1976/kubernetes-homelab/applications/homelab-defender-test` as the authoritative desired state
 - ✅ Deployment, verification and rollback procedure documented in `k8s/README.md`
 - ✅ Restricted `jenkins-deploy` SSH path proven from Jenkins/TestServer to `k3s-node-01`
 - ✅ Build 13 proved automatic rollback: publish and rollout succeeded, a transient service-level health check failed, and the deployment returned safely to build 12
@@ -236,17 +236,17 @@ A finding that breaches policy stops the pipeline before publication.
 
 ## Kubernetes deployment
 
-The reproducible Kubernetes baseline is stored at:
+The authoritative Kubernetes desired state is stored in:
 
 ```text
-k8s/homelab-defender-test.yaml
+jrwroberts1976/kubernetes-homelab/applications/homelab-defender-test
 ```
 
-It defines the `homelab-defender-test` Namespace, the application Deployment, a private ClusterIP Service, and readiness/liveness probes against `/healthz`.
+That Kustomization owns the `homelab-defender-test` Namespace, application Deployment, private ClusterIP Service, readiness/liveness probes against `/healthz`, and the approved image tag and digest.
 
-The baseline manifest is used to create or recover the Kubernetes object structure. The live release image is selected by the Jenkins deployment stage using the Jenkins build number. This means the YAML structure remains version-controlled while release state is traceable through the Jenkins build and the Deployment's `kubernetes.io/change-cause` annotation.
+The Jenkins release path can advance the running Deployment after a gated build. After a release is approved, its tag and digest must be reconciled back into `kubernetes-homelab` so Git remains the authoritative desired state. Do not restore the retired duplicate manifest in this repository.
 
-Deployment, verification and rollback instructions are in [`k8s/README.md`](k8s/README.md).
+Deployment, verification, reconciliation and rollback instructions are in [`k8s/README.md`](k8s/README.md).
 
 The root-owned deployment implementation used by the restricted Jenkins SSH path is versioned at:
 
